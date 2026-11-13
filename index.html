@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- SEO и превью для соцсетей -->
+<title>Mic Booster — Усилитель микрофона онлайн</title>
+<meta name="description" content="Бесплатное веб-приложение для усиления громкости микрофона в реальном времени. Работает прямо в браузере.">
+
+<!-- Open Graph (превью в Discord, Telegram, VK) -->
+<meta property="og:title" content="🎤 Mic Booster">
+<meta property="og:description" content="Усилитель микрофона прямо в браузере. Усиление до 20x, визуализация, запись.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://your-username.github.io/mic-booster/preview.png">
+
+<!-- Favicon -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 15px;
+  }
+  .container {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 25px;
+    max-width: 500px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  h1 { text-align: center; margin-bottom: 10px; font-size: 1.6em; }
+  .subtitle { text-align: center; color: #888; font-size: 0.85em; margin-bottom: 15px; }
+  canvas {
+    width: 100%;
+    height: 80px;
+    background: #000;
+    border-radius: 10px;
+    margin: 15px 0;
+    display: block;
+  }
+  .control { margin: 12px 0; }
+  label { display: block; margin-bottom: 6px; font-size: 0.85em; color: #aaa; }
+  input[type="range"] { width: 100%; accent-color: #4ecca3; }
+  .gain-value {
+    text-align: center;
+    font-size: 1.8em;
+    color: #4ecca3;
+    font-weight: bold;
+    margin: 8px 0;
+  }
+  .buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 15px;
+  }
+  button {
+    padding: 11px;
+    border: none;
+    border-radius: 10px;
+    background: #4ecca3;
+    color: #1a1a2e;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.85em;
+  }
+  button:hover:not(:disabled) { transform: translateY(-2px); }
+  button:disabled { background: #555; color: #888; cursor: not-allowed; }
+  button.stop { background: #e74c3c; color: white; }
+  button.record { background: #f39c12; color: white; }
+  .status {
+    text-align: center;
+    margin-top: 12px;
+    padding: 10px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.3);
+    font-size: 0.85em;
+  }
+  .level-bar {
+    height: 8px;
+    background: #333;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 5px;
+  }
+  .level-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #4ecca3, #f39c12, #e74c3c);
+    transition: width 0.05s;
+  }
+  .footer {
+    text-align: center;
+    margin-top: 15px;
+    font-size: 0.75em;
+    color: #666;
+  }
+  .footer a { color: #4ecca3; text-decoration: none; }
+  
+  /* Мобильная адаптация */
+  @media (max-width: 480px) {
+    .container { padding: 18px; }
+    h1 { font-size: 1.3em; }
+    .gain-value { font-size: 1.5em; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎤 Mic Booster</h1>
+  <p class="subtitle">Усилитель микрофона в браузере</p>
+  
+  <canvas id="visualizer"></canvas>
+  
+  <div class="control">
+    <label>Усиление: <span id="gainText">1.0x</span></label>
+    <input type="range" id="gainSlider" min="0.1" max="20" step="0.1" value="1">
+    <div class="gain-value" id="gainDisplay">1.0x</div>
+  </div>
+  
+  <div class="control">
+    <label>Уровень сигнала:</label>
+    <div class="level-bar"><div class="level-fill" id="levelFill"></div></div>
+  </div>
+  
+  <div class="buttons">
+    <button id="startBtn">▶ Запустить</button>
+    <button id="monitorBtn" disabled>🔊 Мониторинг</button>
+    <button id="recordBtn" class="record" disabled>⏺ Запись</button>
+    <button id="stopBtn" class="stop" disabled>⏹ Стоп</button>
+  </div>
+  
+  <div class="status" id="status">Нажмите «Запустить» для начала</div>
+  
+  <div class="footer">
+    Работает через Web Audio API · <a href="https://github.com/" target="_blank">GitHub</a>
+  </div>
+</div>
+
+<script>
+let audioContext, micStream, sourceNode, gainNode, analyser, destNode;
+let isRunning = false, isMonitoring = false, isRecording = false;
+let mediaRecorder, recordedChunks = [];
+let animationId;
+
+const canvas = document.getElementById('visualizer');
+const ctx = canvas.getContext('2d');
+const gainSlider = document.getElementById('gainSlider');
+const gainDisplay = document.getElementById('gainDisplay');
+const gainText = document.getElementById('gainText');
+const levelFill = document.getElementById('levelFill');
+const statusEl = document.getElementById('status');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const monitorBtn = document.getElementById('monitorBtn');
+const recordBtn = document.getElementById('recordBtn');
+
+function resizeCanvas() {
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+gainSlider.addEventListener('input', () => {
+  const v = parseFloat(gainSlider.value);
+  gainDisplay.textContent = v.toFixed(1) + 'x';
+  gainText.textContent = v.toFixed(1) + 'x';
+  if (gainNode) gainNode.gain.value = v;
+});
+
+startBtn.addEventListener('click', async () => {
+  try {
+    // Проверка на безопасное соединение (для GitHub Pages это всегда true)
+    if (!window.isSecureContext) {
+      statusEl.textContent = '❌ Требуется HTTPS!';
+      return;
+    }
+    
+    micStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: { 
+        echoCancellation: false, 
+        noiseSuppression: false,
+        autoGainControl: false 
+      } 
+    });
+    
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    sourceNode = audioContext.createMediaStreamSource(micStream);
+    
+    gainNode = audioContext.createGain();
+    gainNode.gain.value = parseFloat(gainSlider.value);
+    
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    
+    destNode = audioContext.createMediaStreamDestination();
+    
+    sourceNode.connect(gainNode);
+    gainNode.connect(analyser);
+    gainNode.connect(destNode);
+    
+    isRunning = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    monitorBtn.disabled = false;
+    recordBtn.disabled = false;
+    statusEl.textContent = '✅ Микрофон активен';
+    
+    drawVisualizer();
+  } catch (err) {
+    statusEl.textContent = '❌ Ошибка: ' + err.message;
+    console.error(err);
+  }
+});
+
+stopBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording();
+  if (isMonitoring) toggleMonitor();
+  
+  micStream.getTracks().forEach(t => t.stop());
+  audioContext.close();
+  cancelAnimationFrame(animationId);
+  
+  isRunning = false;
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  monitorBtn.disabled = true;
+  recordBtn.disabled = true;
+  statusEl.textContent = 'Остановлено';
+  
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  levelFill.style.width = '0%';
+});
+
+function toggleMonitor() {
+  if (!isRunning) return;
+  isMonitoring = !isMonitoring;
+  
+  if (isMonitoring) {
+    gainNode.connect(audioContext.destination);
+    monitorBtn.textContent = '🔇 Выкл. мониторинг';
+    monitorBtn.classList.add('stop');
+    statusEl.textContent = '🔊 Мониторинг включён (используйте наушники!)';
+  } else {
+    gainNode.disconnect(audioContext.destination);
+    monitorBtn.textContent = '🔊 Мониторинг';
+    monitorBtn.classList.remove('stop');
+    statusEl.textContent = '✅ Микрофон активен';
+  }
+}
+monitorBtn.addEventListener('click', toggleMonitor);
+
+recordBtn.addEventListener('click', () => {
+  if (!isRecording) startRecording();
+  else stopRecording();
+});
+
+function startRecording() {
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(destNode.stream);
+  mediaRecorder.ondataavailable = e => recordedChunks.push(e.data);
+  mediaRecorder.onstop = saveRecording;
+  mediaRecorder.start();
+  isRecording = true;
+  recordBtn.textContent = '⏹ Стоп запись';
+  statusEl.textContent = '⏺ Идёт запись...';
+}
+
+function stopRecording() {
+  mediaRecorder.stop();
+  isRecording = false;
+  recordBtn.textContent = '⏺ Запись';
+  statusEl.textContent = '✅ Запись сохранена';
+}
+
+function saveRecording() {
+  const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mic-boosted-${Date.now()}.webm`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function drawVisualizer() {
+  if (!isRunning) return;
+  animationId = requestAnimationFrame(drawVisualizer);
+  
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  analyser.getByteFrequencyData(dataArray);
+  
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  const barWidth = (canvas.width / bufferLength) * 2;
+  let x = 0;
+  
+  for (let i = 0; i < bufferLength; i++) {
+    const barHeight = (dataArray[i] / 255) * canvas.height;
+    const hue = (i / bufferLength) * 120 + 100;
+    ctx.fillStyle = `hsl(${hue}, 70%, 55%)`;
+    ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+    x += barWidth + 1;
+  }
+  
+  let sum = 0;
+  for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+  const avg = sum / bufferLength;
+  levelFill.style.width = Math.min(100, (avg / 128) * 100) + '%';
+}
+</script>
+</body>
+</html>
